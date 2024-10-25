@@ -2,7 +2,7 @@
 // © Elijah Ekpen Mensah
 
 //@version=5
-indicator("Druken Fist Indicator",overlay=true,max_bars_back=5000)
+indicator("IP MAN INDICATOR",overlay=true,max_bars_back=5000)
 
 
 
