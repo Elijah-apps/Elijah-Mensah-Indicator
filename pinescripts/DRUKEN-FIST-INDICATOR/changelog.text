@@ -1,0 +1,39 @@
+add feature to relatively see toggale bond yields market trend
+table on 
+chart
+as timeframe, trend,mommentum,advise
+
+they can actually select their bond yield focus via settings
+1: US Bond yield Curve
+2. EUR Bond yield Curve
+3. Japan Bond Yield Curve
+4. British Bond Yield
+
+# Because inflation affects price of 
+
+
+# There should be a 
+market  relativity config were you choose market config and whether should inverse or follow signal
+
+
+
+
+# Also added multitimeframe analysis config were you 
+select the macro timeframe and it does topdown analysis
+
+
+# Also add Stoploss and Takeprofit Table which is controlled by s/l config
+
+
+#Options Window determine to go 1 Cand or 2 Cand depending on the candlesticks pattern, trend and pressurefh and expected market push it also have countdown timer
+
+# using to fetch this bond yield data request.security
+
+
+
+
+# Intermarket window
+# Up down window
+# S/L Window
+# Options Window
+
