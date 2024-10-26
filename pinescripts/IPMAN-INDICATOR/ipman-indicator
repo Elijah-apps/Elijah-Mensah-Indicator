@@ -1007,3 +1007,132 @@ if barstate.islast and array.get(bools,1)
          text_color=array.get(tbl_col,i),text_size=size.auto,
          tooltip=array.get(tbl_tips,i))
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
+
+
+
+
+// Input for selecting different bonds
+bond_symbol = input.string("US10Y", title="Select Bond Symbol", options=["US10Y", "DE10Y", "JP10Y", "UK10Y"])
+
+// Toggle options for tables (default set to false)
+show_bond_relationships = input(false, title="Show Bond Relationships Table")
+show_bond_trends = input(false, title="Show Bond Trends Table")
+show_currency_trends = input(false, title="Show Currency Trends Table")
+
+// Get the current chart's symbol to determine the currency pair
+currency_pair = syminfo.ticker  // Automatically gets the chart symbol
+
+// Function to determine trend based on SMA
+getTrend(closePrice, emaLength) =>
+    ema = ta.ema(closePrice, emaLength)
+    trend = closePrice > ema ? "Buy" : "Sell"
+    [trend, ema]
+
+// Fetch bond data for different timeframes
+bond_close_1D = request.security(bond_symbol, "D", close)
+bond_close_4H = request.security(bond_symbol, "240", close)
+bond_close_same_tf = request.security(bond_symbol, timeframe.period, close)
+
+// Fetch currency data for different timeframes
+currency_close_1D = request.security(currency_pair, "D", close)
+currency_close_4H = request.security(currency_pair, "240", close)
+currency_close_same_tf = request.security(currency_pair, timeframe.period, close)
+
+// Calculate SMA and trend for different timeframes (Bonds)
+[trend_bond_1D, ema_bond_1D] = getTrend(bond_close_1D, 200)
+[trend_bond_4H, ema_bond_4H] = getTrend(bond_close_4H, 200)
+[trend_bond_same_tf, ema_bond_same_tf] = getTrend(bond_close_same_tf, 200)
+
+// Calculate SMA and trend for different timeframes (Currencies)
+[trend_currency_1D, ema_currency_1D] = getTrend(currency_close_1D, 200)
+[trend_currency_4H, ema_currency_4H] = getTrend(currency_close_4H, 200)
+[trend_currency_same_tf, ema_currency_same_tf] = getTrend(currency_close_same_tf, 200)
+
+// Create a new table for Bond Type relationships
+var table bondRelationshipTable = table.new(position.top_center, 3, 12, border_width=1, frame_color=color.new(color.gray, 0))
+
+// Update Bond Relationship Table
+if (bar_index == 0 or barstate.islast)
+    // Table headers
+    table.cell(bondRelationshipTable, 0, 0, "Bond Type", bgcolor=color.new(color.gray, 30), text_color=color.white, text_size=size.normal)
+    table.cell(bondRelationshipTable, 1, 0, "Currency Pair", bgcolor=color.new(color.gray, 30), text_color=color.white, text_size=size.normal)
+    table.cell(bondRelationshipTable, 2, 0, "Effect", bgcolor=color.new(color.gray, 30), text_color=color.white, text_size=size.normal)
+
+    // Relationships
+    table.cell(bondRelationshipTable, 0, 1, "US10Y", bgcolor=color.new(color.gray, 90), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 1, "USD/Gold", bgcolor=color.new(color.gray, 90), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 1, "Inverse", bgcolor=color.new(color.gray, 90), text_color=color.white)
+
+    table.cell(bondRelationshipTable, 0, 2, "US10Y", bgcolor=color.new(color.gray, 90), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 2, "USD/JPY", bgcolor=color.new(color.gray, 90), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 2, "Negative Correlation", bgcolor=color.new(color.gray, 90), text_color=color.white)
+
+    table.cell(bondRelationshipTable, 0, 3, "US10Y", bgcolor=color.new(color.gray, 90), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 3, "GBP/USD", bgcolor=color.new(color.gray, 90), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 3, "Positive Correlation", bgcolor=color.new(color.gray, 90), text_color=color.white)
+
+    table.cell(bondRelationshipTable, 0, 4, "DE10Y", bgcolor=color.new(color.gray, 70), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 4, "EUR/USD", bgcolor=color.new(color.gray, 70), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 4, "Inverse", bgcolor=color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(bondRelationshipTable, 0, 5, "DE10Y", bgcolor=color.new(color.gray, 70), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 5, "GBP/JPY", bgcolor=color.new(color.gray, 70), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 5, "Negative Correlation", bgcolor=color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(bondRelationshipTable, 0, 6, "JP10Y", bgcolor=color.new(color.gray, 50), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 6, "JPY/USD", bgcolor=color.new(color.gray, 50), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 6, "Inverse", bgcolor=color.new(color.gray, 50), text_color=color.white)
+
+    table.cell(bondRelationshipTable, 0, 7, "JP10Y", bgcolor=color.new(color.gray, 50), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 7, "EUR/JPY", bgcolor=color.new(color.gray, 50), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 7, "Negative Correlation", bgcolor=color.new(color.gray, 50), text_color=color.white)
+
+    table.cell(bondRelationshipTable, 0, 8, "UK10Y", bgcolor=color.new(color.gray, 30), text_color=color.white)
+    table.cell(bondRelationshipTable, 1, 8, "GBP/USD", bgcolor=color.new(color.gray, 30), text_color=color.white)
+    table.cell(bondRelationshipTable, 2, 8, "Positive Correlation", bgcolor=color.new(color.gray, 30), text_color=color.white)
+
+// Create two tables for trends
+var table bondTable = table.new(position.bottom_center, 2, 4, border_width=1, frame_color=color.new(color.blue, 0))
+var table currencyTable = table.new(position.bottom_right, 2, 4, border_width=1, frame_color=color.new(color.red, 0))
+
+// Update Bond Table
+if (show_bond_trends and (bar_index == 0 or barstate.islast))
+    // Bond Table headers
+    table.cell(bondTable, 0, 0, "Bond Timeframe", bgcolor=color.new(color.blue, 30), text_color=color.white, text_size=size.normal)
+    table.cell(bondTable, 1, 0, "Position", bgcolor=color.new(color.blue, 30), text_color=color.white, text_size=size.normal)
+    
+    // Bond Timeframes
+    table.cell(bondTable, 0, 1, "1D", bgcolor=color.new(color.blue, 90), text_color=color.white)
+    table.cell(bondTable, 0, 2, "4H", bgcolor=color.new(color.blue, 70), text_color=color.white)
+    table.cell(bondTable, 0, 3, timeframe.period, bgcolor=color.new(color.blue, 50), text_color=color.white)
+    
+    // Bond Positions
+    table.cell(bondTable, 1, 1, trend_bond_1D, bgcolor=color.new(color.green, 90), text_color=color.white)
+    table.cell(bondTable, 1, 2, trend_bond_4H, bgcolor=color.new(color.green, 70), text_color=color.white)
+    table.cell(bondTable, 1, 3, trend_bond_same_tf, bgcolor=color.new(color.green, 50), text_color=color.white)
+
+// Update Currency Table
+if (show_currency_trends and (bar_index == 0 or barstate.islast))
+    // Currency Table headers
+    table.cell(currencyTable, 0, 0, "Currency Timeframe", bgcolor=color.new(color.red, 30), text_color=color.white, text_size=size.normal)
+    table.cell(currencyTable, 1, 0, "Position", bgcolor=color.new(color.red, 30), text_color=color.white, text_size=size.normal)
+    
+    // Currency Timeframes
+    table.cell(currencyTable, 0, 1, "1D", bgcolor=color.new(color.red, 90), text_color=color.white)
+    table.cell(currencyTable, 0, 2, "4H", bgcolor=color.new(color.red, 70), text_color=color.white)
+    table.cell(currencyTable, 0, 3, timeframe.period, bgcolor=color.new(color.red, 50), text_color=color.white)
+    
+    // Currency Positions
+    table.cell(currencyTable, 1, 1, trend_currency_1D, bgcolor=color.new(color.green, 90), text_color=color.white)
+    table.cell(currencyTable, 1, 2, trend_currency_4H, bgcolor=color.new(color.green, 70), text_color=color.white)
+    table.cell(currencyTable, 1, 3, trend_currency_same_tf, bgcolor=color.new(color.green, 50), text_color=color.white)
+
+// Show/hide tables based on user input
+if not show_bond_relationships
+    table.delete(bondRelationshipTable)
+
+if not show_bond_trends
+    table.delete(bondTable)
+
+if not show_currency_trends
+    table.delete(currencyTable)
