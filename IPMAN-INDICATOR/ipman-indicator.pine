@@ -2,7 +2,428 @@
 // © Elijah Ekpen Mensah
 
 //@version=5
-indicator("IP MAN INDICATOR",overlay=true,max_bars_back=5000)
+indicator("IP MAN INDICATOR",overlay=true,max_bars_back=5000,max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500, dynamic_requests = true)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const bool DEBUG = false
+const bool fixSRs = true
+ 
+const int maxSRInfoListSize = 10
+const int maxBarInfoListSize = 3000
+const int maxDistanceToLastBar = 500
+const int retestLabelCooldown = 3
+const float retestATR = 1.0 / 8.0
+const float zoneSizeATR = 0.075
+const int labelOffsetBars = 20
+
+const int atrLen = 20
+atr = ta.atr(atrLen)
+avgVolume = ta.sma(volume, atrLen)
+
+var int curTFMS = timeframe.in_seconds(timeframe.period) * 1000
+var map<string, bool> alerts = map.new<string, bool>()
+alerts.put("Retest", false)
+alerts.put("Break", false)
+
+srPivotLength = input.int(15, "Pivot Length", minval = 3, maxval = 50, group = "General Configuration", display = display.none)
+srStrength = input.int(1, "Strength", [1, 2, 3], group = "General Configuration", display = display.none)
+srInvalidation = input.string("Wick", "Invalidation", ["Wick", "Close"], group = "General Configuration", display = display.none)
+expandZones = input.string("Only Valid", "Expand Lines & Zones", options = ["All", "Only Valid", "None"], group = "General Configuration", display = display.none)
+showInvalidated = input.bool(true, "Show Invalidated", group = "General Configuration", display = display.none)
+
+timeframe1Enabled = input.bool(true, title = "", group = "Timeframes", inline = "timeframe1", display = display.none)
+timeframe1 = input.timeframe("", title = "", group = "Timeframes", inline = "timeframe1", display = display.none)
+timeframe2Enabled = input.bool(false, title = "", group = "Timeframes", inline = "timeframe2", display = display.none)
+timeframe2 = input.timeframe("D", title = "", group = "Timeframes", inline = "timeframe2", display = display.none)
+timeframe3Enabled = input.bool(false, title = "", group = "Timeframes", inline = "timeframe3", display = display.none)
+timeframe3 = input.timeframe("W", title = "", group = "Timeframes", inline = "timeframe3", display = display.none)
+
+showBreaks = input.bool(true, "Show Breaks", group = "Breaks & Retests", inline = "ShowBR", display = display.none)
+showRetests = input.bool(true, "Show Retests", group = "Breaks & Retests", inline = "ShowBR", display = display.none)
+avoidFalseBreaks = input.bool(false, "Avoid False Breaks", group = "Breaks & Retests", display = display.none)
+breakVolumeThreshold = input.float(0.3, "Break Volume Threshold", minval = 0.1, maxval = 2.0, step = 0.1, group = "Breaks & Retests", tooltip = "Only taken into account if Avoid False Breakouts is enabled.\nHigher values mean it's less likely to be a break.", display = display.none)
+inverseBrokenLineColor = input.bool(false, "Inverse Color After Broken", group = "Breaks & Retests", display = display.none)
+
+styleMode = input.string("Lines", "Style", ["Lines", "Zones"], group = "Style", display = display.none)
+lineStyle = input.string("____", "Line Style", ["____", "----", "...."], group = "Style", display = display.none)
+lineWidth = input.int(2, "Line Width", minval = 1, group = "Style", display = display.none)
+supportColor = input.color(#08998180, "Support Color", group = "Style", inline = "RScolors", display = display.none)
+resistanceColor = input.color(#f2364580, "Resistance Color", group = "Style", inline = "RScolors", display = display.none)
+breakColor = input.color(color.blue, "Break Color", group = "Style", inline = "RScolors2", display = display.none)
+textColor = input.color(#ffffff80, "Text Color", group = "Style", inline = "RScolors2", display = display.none)
+
+enableRetestAlerts = input.bool(true, "Enable Retest Alerts", tooltip = "Needs Show Retests option enabled.", group = "Alerts", display = display.none)
+enableBreakAlerts = input.bool(true, "Enable Break Alerts", tooltip = "Needs Show Breaks option enabled.", group = "Alerts", display = display.none)
+
+insideBounds = (bar_index > last_bar_index - maxDistanceToLastBar)
+
+type srInfo
+    int startTime
+    float price
+    string srType
+    int strength
+    string timeframeStr
+    bool ephemeral = false
+
+    int breakTime
+    array<int> retestTimes
+
+type srObj
+    srInfo info
+
+    bool startFixed
+    bool breakFixed
+
+    line srLine
+    box srBox
+    label srLabel
+    label breakLabel
+    array<label> retestLabels
+
+type barInfo
+    int t
+    int tc
+    float h
+    float l
+
+//#region Find Val RTN Time
+findValRtnTime (barInfo[] biList, valToFind, toSearch, searchMode, minTime, maxTime, int defVal = na) =>
+    int rtnTime = defVal
+    float minDiff = na
+    if biList.size() > 0
+        for i = biList.size() - 1 to 0
+            curBI = biList.get(i)
+            if curBI.t >= minTime and curBI.t < maxTime
+                toLook = (toSearch == "Low" ? curBI.l : curBI.h)
+                if searchMode == "Nearest"
+                    curDiff = math.abs(valToFind - toLook)
+                    if na(minDiff)
+                        rtnTime := curBI.t
+                        minDiff := curDiff
+                    else
+                        if curDiff <= minDiff
+                            minDiff := curDiff
+                            rtnTime := curBI.t
+                if searchMode == "Higher"
+                    if toLook >= valToFind
+                        rtnTime := curBI.t
+                        break
+                if searchMode == "Lower"
+                    if toLook <= valToFind
+                        rtnTime := curBI.t
+                        break
+    rtnTime
+//#endregion
+
+formatTimeframeString (formatTimeframe) =>
+    timeframeF = formatTimeframe == "" ? timeframe.period : formatTimeframe
+    
+    if str.contains(timeframeF, "D") or str.contains(timeframeF, "W") or str.contains(timeframeF, "S") or str.contains(timeframeF, "M")
+        timeframeF
+    else
+        seconds = timeframe.in_seconds(timeframeF)
+        if seconds >= 3600
+            hourCount = int(seconds / 3600)
+            str.tostring(hourCount) + " Hour" + (hourCount > 1 ? "s" : "")
+        else
+            timeframeF + " Min"
+
+renderSRObj (srObj sr) =>
+    if na(sr.info.breakTime) or showInvalidated
+        endTime = nz(sr.info.breakTime, time + curTFMS * labelOffsetBars)
+        extendType = extend.none
+        if na(sr.info.breakTime)
+            extendType := extend.right
+        if expandZones == "Only Valid" and na(sr.info.breakTime)
+            extendType := extend.both
+        else if expandZones == "All"
+            extendType := extend.both
+            endTime := time + curTFMS * labelOffsetBars
+        
+        labelTitle = formatTimeframeString(sr.info.timeframeStr) + " | " + str.tostring(sr.info.price, format.mintick)
+        if styleMode == "Lines"
+            // Line
+            sr.srLine := line.new(sr.info.startTime, sr.info.price, endTime, sr.info.price, xloc = xloc.bar_time, color = sr.info.srType == "Resistance" ? resistanceColor : supportColor, width = lineWidth, style = lineStyle == "----" ? line.style_dashed : lineStyle == "...." ? line.style_dotted : line.style_solid, extend = extendType)
+            // Label
+            sr.srLabel := label.new(extendType == extend.none ? ((sr.info.startTime + endTime) / 2) : endTime, sr.info.price, xloc = xloc.bar_time, text = labelTitle, textcolor = textColor, style = label.style_none)
+        else
+            // Zone
+            sr.srBox := box.new(sr.info.startTime, sr.info.price + atr * zoneSizeATR, endTime, sr.info.price - atr * zoneSizeATR, xloc = xloc.bar_time, bgcolor = sr.info.srType == "Resistance" ? resistanceColor : supportColor, border_color = na, text = labelTitle, text_color = textColor, extend = extendType, text_size = size.normal, text_halign = (extendType != extend.none) ? text.align_right : text.align_center)
+
+        // Break Label
+        if showBreaks
+            if not na(sr.info.breakTime)
+                sr.breakLabel := label.new(sr.info.breakTime, sr.info.price, "B", yloc = sr.info.srType ==  "Resistance" ? yloc.belowbar : yloc.abovebar, style = sr.info.srType == "Resistance" ? label.style_label_up : label.style_label_down, color = breakColor, textcolor = color.new(textColor, 0), xloc = xloc.bar_time, size = size.small)
+                if (time - curTFMS <= sr.info.breakTime) and (time + curTFMS >= sr.info.breakTime)
+                    alerts.put("Break", true)
+
+        // Retest Labels
+        if showRetests
+            if sr.info.retestTimes.size() > 0
+                for i = sr.info.retestTimes.size() - 1 to 0
+                    curRetestTime = sr.info.retestTimes.get(i)
+                    cooldownOK = true
+                    if sr.retestLabels.size() > 0
+                        lastLabel = sr.retestLabels.get(0)
+                        if math.abs(lastLabel.get_x() - curRetestTime) < curTFMS * retestLabelCooldown
+                            cooldownOK := false
+
+                    if cooldownOK
+                        if time - curTFMS <= curRetestTime and time >= curRetestTime
+                            alerts.put("Retest", true)
+                        sr.retestLabels.unshift(label.new(curRetestTime, sr.info.price, "R", yloc = sr.info.srType ==  "Resistance" ? yloc.abovebar : yloc.belowbar, style = sr.info.srType == "Resistance" ? label.style_label_down : label.style_label_up, color = sr.info.srType == "Resistance" ? resistanceColor : supportColor, textcolor = color.new(textColor, 0), xloc = xloc.bar_time, size = size.small))
+
+safeDeleteSRObj (srObj sr) =>
+    line.delete(sr.srLine)
+    box.delete(sr.srBox)
+    label.delete(sr.srLabel)
+    label.delete(sr.breakLabel)
+    if sr.retestLabels.size() > 0
+        for i = 0 to sr.retestLabels.size() - 1
+            curRetestLabel = sr.retestLabels.get(i)
+            label.delete(curRetestLabel)
+
+var allSRInfoList = array.new<srInfo>()
+var barInfoList = array.new<barInfo>()
+
+pivotHigh = ta.pivothigh(srPivotLength, srPivotLength)
+pivotLow = ta.pivotlow(srPivotLength, srPivotLength)
+
+barInfoList.unshift(barInfo.new(time, time_close, high, low))
+if barInfoList.size() > maxBarInfoListSize
+    barInfoList.pop()
+
+if insideBounds and barstate.isconfirmed
+    // Find Supports
+    if not na(pivotLow)
+        validSR = true
+        if allSRInfoList.size() > 0
+            for i = 0 to allSRInfoList.size() - 1
+                curRSInfo = allSRInfoList.get(i)
+                if (math.abs(curRSInfo.price - pivotLow) < atr * retestATR) and na(curRSInfo.breakTime)
+                    validSR := false
+                    break
+        
+        if validSR
+            newSRInfo = srInfo.new(barInfoList.get(srPivotLength).t, pivotLow, "Support", 0, timeframe.period)
+            newSRInfo.retestTimes := array.new<int>()
+
+            for i = 1 to srPivotLength
+                curBI = barInfoList.get(i)
+                if (curBI.l <= newSRInfo.price or math.abs(curBI.l - newSRInfo.price) <= atr * retestATR)
+                    newSRInfo.strength += 1
+                    if curBI.t != newSRInfo.startTime
+                        newSRInfo.retestTimes.unshift(curBI.t)
+            
+            allSRInfoList.unshift(newSRInfo)
+            while allSRInfoList.size() > maxSRInfoListSize
+                allSRInfoList.pop()
+    
+    // Find Resistances
+    if not na(pivotHigh)
+        validSR = true
+        if allSRInfoList.size() > 0
+            for i = 0 to allSRInfoList.size() - 1
+                curRSInfo = allSRInfoList.get(i)
+                if (math.abs(curRSInfo.price - pivotLow) < atr * retestATR) and na(curRSInfo.breakTime)
+                    validSR := false
+                    break
+        if validSR
+            newSRInfo = srInfo.new(barInfoList.get(srPivotLength).t, pivotHigh, "Resistance", 0, timeframe.period)
+            newSRInfo.retestTimes := array.new<int>()
+
+            for i = 1 to srPivotLength
+                curBI = barInfoList.get(i)
+                if (curBI.h >= newSRInfo.price or math.abs(curBI.h - newSRInfo.price) <= atr * retestATR)
+                    newSRInfo.strength += 1
+                    if curBI.t != newSRInfo.startTime
+                        newSRInfo.retestTimes.unshift(curBI.t)
+
+            allSRInfoList.unshift(newSRInfo)
+            if allSRInfoList.size() > maxSRInfoListSize
+                allSRInfoList.pop()
+
+// Handle SR Infos
+if insideBounds and (srInvalidation == "Wick" or barstate.isconfirmed)
+    if allSRInfoList.size() > 0
+        for i = 0 to allSRInfoList.size() - 1
+            srInfo curSRInfo = allSRInfoList.get(i)
+            
+            // Breaks
+            invHigh = (srInvalidation == "Close" ? close : high)
+            invLow = (srInvalidation == "Close" ? close : low)
+            if na(curSRInfo.breakTime)
+                if (not curSRInfo.ephemeral) or (time > curSRInfo.startTime + curTFMS * srPivotLength)
+                    if curSRInfo.srType == "Resistance" and invHigh > curSRInfo.price
+                        if (not avoidFalseBreaks) or (volume > avgVolume * breakVolumeThreshold)
+                            curSRInfo.breakTime := time
+                            if inverseBrokenLineColor and not curSRInfo.ephemeral
+                                ephSR = srInfo.new(time, curSRInfo.price, "Support", curSRInfo.strength, curSRInfo.timeframeStr, true)
+                                ephSR.retestTimes := array.new<int>()
+                                allSRInfoList.unshift(ephSR)
+                    else if curSRInfo.srType == "Support" and invLow < curSRInfo.price
+                        if (not avoidFalseBreaks) or (volume > avgVolume * breakVolumeThreshold)
+                            curSRInfo.breakTime := time
+                            if inverseBrokenLineColor and not curSRInfo.ephemeral
+                                ephSR = srInfo.new(time, curSRInfo.price, "Resistance", curSRInfo.strength, curSRInfo.timeframeStr, true)
+                                ephSR.retestTimes := array.new<int>()
+                                allSRInfoList.unshift(ephSR)
+                
+            // Strength
+            if na(curSRInfo.breakTime)
+                if curSRInfo.srType == "Resistance" and (high >= curSRInfo.price or math.abs(high - curSRInfo.price) <= atr * retestATR)
+                    int lastRetestTime = 0
+                    if curSRInfo.retestTimes.size() > 0
+                        lastRetestTime := curSRInfo.retestTimes.get(0)
+                    
+                    if lastRetestTime != time
+                        curSRInfo.strength += 1
+                        curSRInfo.retestTimes.unshift(time)
+                
+                else if curSRInfo.srType == "Support" and (low <= curSRInfo.price or math.abs(low - curSRInfo.price) <= atr * retestATR)
+                    int lastRetestTime = 0
+                    if curSRInfo.retestTimes.size() > 0
+                        lastRetestTime := curSRInfo.retestTimes.get(0)
+                    
+                    if lastRetestTime != time
+                        curSRInfo.strength += 1
+                        curSRInfo.retestTimes.unshift(time)
+
+fixSRToTimeframe (srObj sr) =>
+    srMS = math.max(timeframe.in_seconds(sr.info.timeframeStr), timeframe.in_seconds()) * 1000
+    if (not sr.startFixed)
+        if sr.info.srType == "Resistance"
+            sr.info.startTime := findValRtnTime(barInfoList, sr.info.price, "High", "Nearest", sr.info.startTime - srMS, sr.info.startTime + srMS, sr.info.startTime)
+        else
+            sr.info.startTime := findValRtnTime(barInfoList, sr.info.price, "Low", "Nearest", sr.info.startTime - srMS, sr.info.startTime + srMS, sr.info.startTime)
+        sr.startFixed := true
+
+    if not na(sr.info.breakTime)
+        if (not sr.breakFixed)
+            if sr.info.srType == "Resistance"
+                sr.info.breakTime := findValRtnTime(barInfoList, sr.info.price, "High", "Higher", sr.info.breakTime - srMS, sr.info.breakTime + srMS, sr.info.breakTime)
+            else
+                sr.info.breakTime := findValRtnTime(barInfoList, sr.info.price, "Low", "Lower", sr.info.breakTime - srMS, sr.info.breakTime + srMS, sr.info.breakTime)
+            sr.breakFixed := true
+    
+    if sr.info.retestTimes.size() > 0
+        for i = 0 to sr.info.retestTimes.size() - 1
+            curRetestTime = sr.info.retestTimes.get(i)
+
+            retestStartTime = curRetestTime - srMS
+            retestStartTime := math.max(retestStartTime, sr.info.startTime + 1)
+            
+            retestEndTime = curRetestTime + srMS
+            if not na(sr.info.breakTime)
+                retestEndTime := math.min(retestEndTime, sr.info.breakTime - 1)
+            
+            if sr.info.srType == "Resistance"
+                sr.info.retestTimes.set(i, findValRtnTime(barInfoList, sr.info.price, "High", "Nearest", retestStartTime, retestEndTime, sr.info.retestTimes.get(i)))
+            else
+                sr.info.retestTimes.set(i, findValRtnTime(barInfoList, sr.info.price, "Low", "Nearest", retestStartTime, retestEndTime, sr.info.retestTimes.get(i)))
+
+getSR (srObj[] list, srPrice, eph, srType) =>
+    srObj rtnSR = na
+    if list.size() > 0
+        for i = 0 to list.size() - 1
+            curSR = list.get(i)
+            if curSR.info.price == srPrice and curSR.info.ephemeral == eph and curSR.info.srType == srType
+                rtnSR := curSR
+                break
+    rtnSR
+
+// Handle SR
+var allSRList = array.new<srObj>()
+handleTF (tfStr, tfEnabled) =>
+    if tfEnabled
+        tfSRInfoList = request.security(syminfo.tickerid, tfStr, allSRInfoList)
+        if tfSRInfoList.size() > 0
+            for i = 0 to tfSRInfoList.size() - 1
+                srInfo curSRInfo = tfSRInfoList.get(i)
+                if fixSRs
+                    currentSameSR = getSR(allSRList, curSRInfo.price, curSRInfo.ephemeral, curSRInfo.srType)
+                    if not na(currentSameSR)
+                        if currentSameSR.startFixed
+                            curSRInfo.startTime := currentSameSR.info.startTime
+                        if currentSameSR.breakFixed
+                            curSRInfo.breakTime := currentSameSR.info.breakTime
+                            curSRInfo.retestTimes := currentSameSR.info.retestTimes
+                        currentSameSR.info := curSRInfo
+                        if not currentSameSR.breakFixed
+                            fixSRToTimeframe(currentSameSR)
+                    else
+                        srObj newSRObj = srObj.new(curSRInfo)
+                        newSRObj.retestLabels := array.new<label>()
+                        fixSRToTimeframe(newSRObj)
+                        allSRList.unshift(newSRObj)
+                else
+                    srObj newSRObj = srObj.new(curSRInfo)
+                    newSRObj.retestLabels := array.new<label>()
+                    allSRList.unshift(newSRObj)
+    true
+
+if insideBounds and barstate.islast
+    if not fixSRs
+        if allSRList.size() > 0
+            for i = 0 to allSRList.size() - 1
+                srObj curSRObj = allSRList.get(i)
+                safeDeleteSRObj(curSRObj)
+        allSRList.clear()
+        
+    handleTF(timeframe1, timeframe1Enabled)
+    handleTF(timeframe2, timeframe2Enabled)
+    handleTF(timeframe3, timeframe3Enabled)
+    
+    if allSRList.size() > 0
+        for i = 0 to allSRList.size() - 1
+            srObj curSRObj = allSRList.get(i)
+            if curSRObj.info.strength >= srStrength
+                safeDeleteSRObj(curSRObj)
+                renderSRObj(curSRObj)
+
+//plotchar(alerts.get("Break") ? high : na, "", "✅", size = size.normal)
+//plotchar(alerts.get("Retest") ? high : na, "", "❤️", size = size.normal, location = location.belowbar)
+
+alertcondition(alerts.get("Retest"), "New Retest", "")
+alertcondition(alerts.get("Break"), "New Break", "")
+
+if enableRetestAlerts and alerts.get("Retest")
+    alert("New Retests Occured.")
+
+if enableBreakAlerts and alerts.get("Break")
+    alert("New Breaks Occured.")
+
+
+
+
+
+
 
 
 
@@ -56,7 +477,7 @@ alertcondition(buySignal, title = "UT Long", message = "UT Long")
 alertcondition(sellSignal, title = "UT Short", message = "UT Short")
 
 
-settings = "Settings"
+settings = "Smart Config"
 zigzag_len = input.int(9, "ZigZag Length", group=settings)
 show_zigzag = input.bool(true, "Show Zigzag", group=settings)
 fib_factor = input.float(0.273, "Fib Factor for breakout confirmation", 0, 1, 0.01, group=settings)
@@ -291,7 +712,7 @@ var bool [] alert_bool  = array.from(
  input.bool(true,title="Bullish/Bearish Bias",group="Any alert() function call"),
  input.bool(true,title="Bullish/Bearish Percentage",group="Any alert() function call"))
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
+centralSMA = input.bool(true, title="Central SMA")
 HPeriod = input(13, 'HIGH Period')
 LPeriod = input(21, 'LOW Period')
 iff_1 = close < nz(ta.sma(low, LPeriod))[1] ? -1 : 0
@@ -990,22 +1411,7 @@ if fill
         filler := linefill.new(get,get1,color=col)
         linefill.delete(filler[1])
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
-
-// ~~ Table {
-if barstate.islast and array.get(bools,1)
-    //Calulate WinRatio
-    W  = matrix.get(total,6,0)
-    L  = matrix.get(total,6,1)
-    WR = math.round(W/(W+L)*100,2)
-    string [] tbl_vals = array.from("New Candlestick Probability ","WIN: "+str.tostring(W),
-     "LOSS: "+str.tostring(L),
-     "Profitability: "+str.tostring(WR,format.percent))
-    color [] tbl_col = array.from(color.green,color.red,chart.fg_color)
-    for i=0 to 2
-        table.cell(matrix.get(tbl,0,0),0,i,array.get(tbl_vals,i),
-         text_halign=text.align_center,bgcolor=chart.bg_color,
-         text_color=array.get(tbl_col,i),text_size=size.auto,
-         tooltip=array.get(tbl_tips,i))
+ 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~}
 
 
@@ -1114,7 +1520,7 @@ if (show_bond_trends and (bar_index == 0 or barstate.islast))
 // Update Currency Table
 if (show_currency_trends and (bar_index == 0 or barstate.islast))
     // Currency Table headers
-    table.cell(currencyTable, 0, 0, "Currency Timeframe", bgcolor=color.new(color.red, 30), text_color=color.white, text_size=size.normal)
+    table.cell(currencyTable, 0, 0, "This Pair Timeframe", bgcolor=color.new(color.red, 30), text_color=color.white, text_size=size.normal)
     table.cell(currencyTable, 1, 0, "Position", bgcolor=color.new(color.red, 30), text_color=color.white, text_size=size.normal)
     
     // Currency Timeframes

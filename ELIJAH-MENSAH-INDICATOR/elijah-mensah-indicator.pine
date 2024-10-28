@@ -1,0 +1,331 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ChartPrime
+
+//@version=5
+indicator("Elijah E Mensah Analaysis", overlay = true, max_labels_count = 500)
+
+// --------------------------------------------------------------------------------------------------------------------}
+// 𝙐𝙎𝙀𝙍 𝙄𝙉𝙋𝙐𝙏𝙎
+// --------------------------------------------------------------------------------------------------------------------{
+
+// Length input to determine the range of bars to calculate the highest and lowest values
+int length = input.int(30)
+
+// New color inputs for up (lime) and down (fuchsia)
+color up_col = input.color(color.lime, "Up Color")
+color dn_col = input.color(color.fuchsia, "Down Color")
+
+// Initialize variables for tracking bars, trend, counts for up/down trends
+var int  bars = 0
+var bool trend = na
+var int  count_up = int(na)
+var int  count_dn = int(na)
+
+// Initialize variables for highest, lowest, and mid-level values
+var float l1 = float(na)
+var float h1 = float(na)
+var float m1 = float(na)
+
+// Initialize label and line variables for visual representation
+var label label_upper = label(na)
+var label label_lower = label(na) 
+var label label_mid   = label(na)
+
+var line line_upper = line(na)
+var line line_lower = line(na) 
+var line line_mid   = line(na)
+
+
+// --------------------------------------------------------------------------------------------------------------------}
+// 𝙄𝙉𝘿𝙄𝘾𝘼𝙏𝙊𝙍 𝘾𝘼𝙇𝘾𝙐𝙇𝘼𝙏𝙄𝙊𝙉𝙎
+// --------------------------------------------------------------------------------------------------------------------{
+
+// Calculate highest and lowest over the specified length
+h = ta.highest(length)
+l = ta.lowest(length)
+
+// Determine trend direction: if the current high is the highest value, set trend to true
+if h == high 
+    trend := true
+
+// If the current low is the lowest value, set trend to false
+if l == low
+    trend := false
+
+// If in an uptrend, increment bars and create labels and lines for visualization
+if trend
+    bars += 1
+    label_lower := label.new(bar_index+10, l1, str.tostring(l1, "#.#"), color = dn_col, style = label.style_label_left)
+    label_upper := label.new(bar_index+10, h1, str.tostring(h1, "#.#"), color = up_col, style = label.style_label_left)
+    label_mid   := label.new(bar_index+10, m1, str.tostring(m1, "#.#"), color = color.gray, style = label.style_label_left)
+
+    // Delete the previous labels before drawing new ones
+    label.delete(label_mid[1])
+    label.delete(label_upper[1])
+    label.delete(label_lower[1])
+
+    // Create lines to represent high, mid, and low levels
+    line_upper := line.new(bar_index, h1, bar_index+10, h1, color = up_col)
+    line_mid   := line.new(bar_index, m1, bar_index+10, m1, color = color.gray, style = line.style_dashed)
+    line_lower := line.new(bar_index, l1, bar_index+10, l1, color = dn_col)
+
+    // Delete the previous lines before drawing new ones
+    line.delete(line_upper[1])
+    line.delete(line_lower[1])
+    line.delete(line_mid[1])
+
+// If in a downtrend, increment bars and create labels and lines similarly to the uptrend case
+if not trend
+    bars += 1
+    label_lower := label.new(bar_index+10, l1, str.tostring(l1, "#.#"), color = dn_col, style = label.style_label_left)
+    label_upper := label.new(bar_index+10, h1, str.tostring(h1, "#.#"), color = up_col, style = label.style_label_left)
+    label_mid   := label.new(bar_index+10, m1, str.tostring(m1, "#.#"), color = color.gray, style = label.style_label_left)
+
+    // Delete the previous labels before drawing new ones
+    label.delete(label_mid[1])
+    label.delete(label_upper[1])
+    label.delete(label_lower[1])
+
+    // Create lines to represent high, mid, and low levels
+    line_upper := line.new(bar_index, h1, bar_index+10, h1, color = up_col)
+    line_mid   := line.new(bar_index, m1, bar_index+10, m1, color = color.gray, style = line.style_dashed)
+    line_lower := line.new(bar_index, l1, bar_index+10, l1, color = dn_col)
+
+    // Delete the previous lines before drawing new ones
+    line.delete(line_upper[1])
+    line.delete(line_lower[1])
+    line.delete(line_mid[1])
+
+// If there is a change in the trend, reset and delete all labels and lines
+if ta.change(trend)
+    label.delete(label_lower)
+    label.delete(label_mid)
+    label.delete(label_upper)
+
+    line.delete(line_upper)
+    line.delete(line_lower)
+    line.delete(line_mid)
+
+    // Reset the bars and counts for the new trend
+    bars := 1
+    count_up := 0
+    count_dn := 0
+
+// Calculate highest, lowest, and mid-level values based on the number of bars
+h1 := ta.highest(bars)
+l1 := ta.lowest(bars)
+m1 := math.avg(h1, l1)
+
+// Handle the case when bars are just starting (bars == 1), set values to na
+if bars == 1 
+    h1 := na
+    l1 := na
+    m1 := na
+
+// Update counters for up and down closes based on the mid-level value
+if close > m1 
+    count_up += 1
+if close < m1 
+    count_dn += 1
+
+// Calculate the delta percentage between up and down counts
+total         = count_up + count_dn
+delta_percent = (count_up - count_dn) / total * 100 
+
+
+// --------------------------------------------------------------------------------------------------------------------}
+// 𝙑𝙄𝙎𝙐𝘼𝙇𝙄𝙕𝘼𝙏𝙄𝙊𝙉
+// --------------------------------------------------------------------------------------------------------------------{
+
+// Display arrows for trend change (uptrend and downtrend signals)
+if (trend and not trend[1]) 
+    label.new(bar_index, low, "⇗", color = up_col, style = label.style_label_upper_right)
+
+if (trend[1] and not trend)
+    label.new(bar_index, high, "⇘", color = dn_col, style = label.style_label_lower_right)
+
+// Gradient color based on the delta percentage for the candles
+color = color.from_gradient(delta_percent, -50, 50, dn_col, up_col)
+
+// Plot candles using the calculated color for the trend
+plotcandle(open, high, low, close, title='Candles', color = color, wickcolor=color, bordercolor = color)
+
+// Plot the high, low, and mid levels as lines
+pl = plot(l1, color = dn_col, style = plot.style_linebr)
+ph = plot(h1, color = up_col, style = plot.style_linebr)
+pm = plot(m1, color = bar_index % 3 == 0 ? color.gray : na , style = plot.style_linebr)
+
+// Fill the areas between high/mid and mid/low with gradients
+fill(pm, ph, h1, m1, color.new(up_col, 90), na)
+fill(pm, pl, m1, l1, na, color.new(dn_col, 90))
+
+// Display a table with symbol and trend information
+if barstate.islast
+    var tbl = table.new(position.top_right, 10, 10)
+    tbl.cell(0, 0, "Symbol: ", text_color = chart.fg_color)
+    tbl.cell(1, 0, syminfo.basecurrency, text_color = color)
+    
+    tbl.cell(0, 1, "Trend: ", text_color = chart.fg_color)
+    tbl.cell(1, 1, str.tostring(delta_percent, format.percent), text_color = color)
+
+// --------------------------------------------------------------------------------------------------------------------}
+
+
+
+//Range Sentimenent 
+
+
+
+//------------------------------------------------------------------------------
+//Tooltips
+//-----------------------------------------------------------------------------{
+widthTooltip  = "Bin width percentage. Determine the length of the returned profile bin as a percentage of the Length setting"
+offsetTooltip = "Determine the amount of bars each graphical elements are shifted by"
+
+//-----------------------------------------------------------------------------}
+//Settings
+//-----------------------------------------------------------------------------{
+length2 = input.int(80, minval = 2)
+rows   = input.int(20, minval = 2)
+useIb  = input(false, 'Use Intrabar', inline = 'intrabar') 
+tf     = input.timeframe('1', ''    , inline = 'intrabar')
+
+//Style
+width     = input.float(20, 'Width %', minval = 0, maxval = 100, group = 'Style', tooltip = widthTooltip)
+
+showRange = input(true, 'Show Range Levels', inline = 'range', group = 'Style')
+rangeCss  = input(color.gray, ''         , inline = 'range', group = 'Style')
+
+bullBin   = input(#2157f3, 'Bullish Bin', inline = 'bull', group = 'Style')
+bullMax   = input(true, 'Maximum'         , inline = 'bull', group = 'Style') 
+bearBin   = input(#ff5d00, 'Bearish Bin', inline = 'bear', group = 'Style')
+bearMax   = input(true, 'Minimum'         , inline = 'bear', group = 'Style')
+
+showFill = input(true, 'Show Fill'             , inline = 'fill', group = 'Style')
+bullFill = input(color.new(#2157f3, 90), ''  , inline = 'fill', group = 'Style')
+bearFill = input(color.new(#ff5d00, 90), ''  , inline = 'fill', group = 'Style')
+
+offset = input.int(8, group = 'Style', tooltip = offsetTooltip)
+
+//-----------------------------------------------------------------------------}
+//Function
+//-----------------------------------------------------------------------------{
+get_data() => [close, open]
+
+//-----------------------------------------------------------------------------}
+//Main variables
+//-----------------------------------------------------------------------------{
+var boxes = array.new<box>(0)
+
+//Populate bins array
+if barstate.isfirst
+    for i = 0 to rows-1
+        boxes.push(box.new(na,na,na,na,na
+          , text_valign = text.align_center
+          , text_color = color.white))
+
+n = bar_index
+upper = ta.highest(length2)
+lower = ta.lowest(length2)
+sumad = math.sum(math.abs(close - open), length2)
+
+//Get intrabar data
+[get_close, get_open] = request.security_lower_tf(syminfo.tickerid, tf, get_data())
+
+//-----------------------------------------------------------------------------}
+//Set profile
+//-----------------------------------------------------------------------------{
+//Range levels
+var ltop = line.new(na,na,na,na, color = rangeCss)
+var l75  = line.new(na,na,na,na, color = rangeCss, style = line.style_dashed)
+var l50  = line.new(na,na,na,na, color = rangeCss)
+var l25  = line.new(na,na,na,na, color = rangeCss, style = line.style_dashed)
+var lbtm = line.new(na,na,na,na, color = rangeCss)
+var fill = linefill.new(ltop, lbtm, na)
+
+//Max / Min levels
+var bull_max = line.new(na,na,na,na, color = bullBin)
+var bear_min = line.new(na,na,na,na, color = bearBin)
+
+//Set profile
+if barstate.islast
+    avg = math.avg(upper, lower)
+    avg75 = math.avg(upper, avg)
+    avg25 = math.avg(lower, avg)
+
+    //Set lines coordinates
+    ltop.set_xy1(n - length2, upper), ltop.set_xy2(n + offset, upper)
+    lbtm.set_xy1(n - length2, lower), lbtm.set_xy2(n + offset, lower)
+    
+    //Display range levels
+    if showRange
+        l75.set_xy1(n - length2, avg75) , l75.set_xy2(n + offset, avg75)
+        l50.set_xy1(n - length2, avg)   , l50.set_xy2(n + offset, avg)
+        l25.set_xy1(n - length2, avg25) , l25.set_xy2(n + offset, avg25)
+    else
+        ltop.set_color(na)
+        lbtm.set_color(na)
+
+    //Get bullish/absolute delta sums for each row
+    up = upper
+    dn = upper
+    sums     = array.new_float(0)
+    sums_abs = array.new_float(0)
+
+    //Loop trough each rows
+    for i = 0 to rows-1
+        dn -= (upper - lower) / rows
+        sum = 0.
+        den = 0.
+        
+        //Loop trough most recent bars
+        for j = 0 to length2-1
+            if useIb //Loop trough intrabar prices
+                for k = 0 to (get_close[j]).size()-1
+                    c = (get_close[j]).get(k)
+                    o = (get_open[j]).get(k)
+                    sum += math.max(c, o) <= up and math.min(c, o) >= dn ? c - o : 0
+            else
+                sum += high[j] > dn and low[j] < up ? close[j] - open[j] : 0
+        
+        sums.push(sum)
+        sums_abs.push(math.abs(sum))
+
+        up := dn
+
+    //Set profile bins
+    max = sums_abs.max()
+    up := upper
+    dn := upper
+    
+    for [index, element] in sums
+        dn -= (upper - lower) / rows
+        x2 = n + int(element / max * length2 * (width / 100))
+        
+        css = element > 0 ? color.new(bullBin, 50) : color.new(bearBin, 50)
+
+        //Set box coordinates
+        get_bx = boxes.get(index)
+        get_bx.set_lefttop(n + offset, .9 * up + .1 * dn)
+        get_bx.set_rightbottom(x2 + offset, .9 * dn + .1 * up)
+        get_bx.set_bgcolor(css)
+        get_bx.set_text(str.tostring(element / sumad * 100, format.percent))
+        
+        //Set area MAX/MIN levels
+        if element == sums.max() and bullMax
+            bull_max_val = math.avg(up, dn)
+            bull_max.set_xy1(n + offset, bull_max_val)
+            bull_max.set_xy2(n - length2, bull_max_val)
+
+        if element == sums.min() and bearMax
+            bear_min_val = math.avg(up, dn)
+            bear_min.set_xy1(x2 + offset, bear_min_val)
+            bear_min.set_xy2(n - length2, bear_min_val)
+            
+        up := dn
+    
+    //Fill Area
+    if showFill
+        fill.set_color(sums.sum() > 0 ? color.new(bullBin, 90) : color.new(bearBin, 90))
+
+//-----------------------------------------------------------------------------}
